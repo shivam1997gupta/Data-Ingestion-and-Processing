@@ -1,0 +1,637 @@
+-- --------------------------------------------------------------------Adding the jar file-------------------------------------------------------------------------------------------------------------
+
+ADD JAR /opt/cloudera/parcels/CDH/lib/hive/lib/hive-hcatalog-core-1.1.0-cdh5.11.2.jar;
+
+-- ------------------------------------------------------------------Setting parameters for hive patrtitioning-----------------------------------------------------------------------------------------
+
+SET hive.exec.max.dynamic.partitions=100000;
+SET hive.exec.max.dynamic.partitions.pernode=100000;
+
+-- ---------------------------------------------------------------- Loading data and defining columns as integer or double----------------------------------------------------------------------------
+
+drop  table nyt; 
+
+create external table if not exists nyt(
+VendorID int,
+tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance double,
+RatecodeID int,
+store_and_fwd_flag string,
+PULocationID int,
+DOLocationID int,
+payment_type int,
+fare_amount double,
+extra double,
+mta_tax double,
+tip_amount double,
+tolls_amount double,
+improvement_surcharge double,
+total_amount double)
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION '/common_folder/nyc_taxi_data/'
+tblproperties ("skip.header.line.count"="1"); 
+
+-- ------------------------------------------------------------------------Checking the database--------------------------------------------------------------------------------------------------------
+
+select * from nyt limit 1;
+
+-- check for number of rows in the table
+select count(*) from nyt;
+---> Result of the above query :- 1174569
+---------------------------------------------------------------------------Basic Quality Checks---------------------------------------------------------------------------------------------------------
+
+
+--How many records has each TPEP provider provided?
+select vendorid,count(*) as count_vendor from nyt group by vendorid;
+----> Result of ablove Query
+
+--   vendorid  count_vendor
+-- 1  2	       647183
+-- 2  1	       527386
+-- thus we can conclude that Vendor 2 has lager chuck of data
+
+
+-------------------------------------Check whether the data is consistent, and if not, identify the data quality issues. Mention all data quality issues in comment----------------------------------------
+
+
+-- Calculating % of data vendor 2 has
+SELECT SUM( IF( vendorid == 2,1,0) )/ COUNT(*) * 100 as pct FROM nyt;
+-------> Result of above Query :-     55% od data belong to vendor2 , that leaves 45% of vendor 1
+
+
+----------------------------------------------------------------- 4.A.check for empty cells------------------------------------------------------------------------------------------------------------
+
+select sum(case when 	VendorID 	 is null then 1 else 0 end) 	VendorID 	,
+sum(case when 	tpep_pickup_datetime 	 is null then 1 else 0 end) 	tpep_pickup_datetime 	,
+sum(case when 	tpep_dropoff_datetime 	 is null then 1 else 0 end) 	tpep_dropoff_datetime 	,
+sum(case when 	passenger_count 	 is null then 1 else 0 end) 	passenger_count 	,
+sum(case when 	trip_distance 	 is null then 1 else 0 end) 	trip_distance 	,
+sum(case when 	RatecodeID 	 is null then 1 else 0 end) 	RatecodeID 	,
+sum(case when 	store_and_fwd_flag 	 is null then 1 else 0 end) 	store_and_fwd_flag 	,
+sum(case when 	PULocationID 	 is null then 1 else 0 end) 	PULocationID 	,
+sum(case when 	DOLocationID 	 is null then 1 else 0 end) 	DOLocationID 	,
+sum(case when 	payment_type 	 is null then 1 else 0 end) 	payment_type 	,
+sum(case when 	fare_amount 	 is null then 1 else 0 end) 	fare_amount 	,
+sum(case when 	extra 	 is null then 1 else 0 end) 	extra 	,
+sum(case when 	mta_tax 	 is null then 1 else 0 end) 	mta_tax 	,
+sum(case when 	tip_amount 	 is null then 1 else 0 end) 	tip_amount 	,
+sum(case when 	tolls_amount 	 is null then 1 else 0 end) 	tolls_amount 	,
+sum(case when 	improvement_surcharge 	 is null then 1 else 0 end) 	improvement_surcharge 	,
+sum(case when 	total_amount 	 is null then 1 else 0 end) 	total_amount 	
+from nyt;
+----> Result of above query:- this tells that no column is emplty
+
+
+--------------------------------------------------------------------- 4.B.range of data----------------------------------------------------------------------------------------------------------------
+
+select max(VendorID ) max_VendorID	,	min(VendorID ) min_VendorID	,
+max(tpep_pickup_datetime ) max_tpep_pickup_datetime	,	min(tpep_pickup_datetime ) min_tpep_pickup_datetime	,
+max(tpep_dropoff_datetime ) max_tpep_dropoff_datetime	,	min(tpep_dropoff_datetime ) min_tpep_dropoff_datetime	,
+max(passenger_count ) max_passenger_count	,	min(passenger_count ) min_passenger_count	,
+max(trip_distance ) max_trip_distance	,	min(trip_distance ) min_trip_distance	,
+max(RatecodeID ) max_RatecodeID	,	min(RatecodeID ) min_RatecodeID	,
+max(store_and_fwd_flag ) max_store_and_fwd_flag	,	min(store_and_fwd_flag ) min_store_and_fwd_flag	,
+max(PULocationID ) max_PULocationID	,	min(PULocationID ) min_PULocationID	,
+max(DOLocationID ) max_DOLocationID	,	min(DOLocationID ) min_DOLocationID	,
+max(payment_type ) max_payment_type	,	min(payment_type ) min_payment_type	,
+max(fare_amount ) max_fare_amount	,	min(fare_amount ) min_fare_amount	,
+max(extra ) max_extra	,	min(extra ) min_extra	,
+max(mta_tax ) max_mta_tax	,	min(mta_tax ) min_mta_tax	,
+max(tip_amount ) max_tip_amount	,	min(tip_amount ) min_tip_amount	,
+max(tolls_amount ) max_tolls_amount	,	min(tolls_amount ) min_tolls_amount	,
+max(improvement_surcharge ) max_improvement_surcharge	,	min(improvement_surcharge ) min_improvement_surcharge	,
+max(total_amount ) max_total_amount	,	min(total_amount ) min_total_amount		
+from nyt;
+-----> Result of above query:-    vendorid is fine; values between two provider of 1 & 2
+
+--------------------------------------------------- 4.C.Checking for remaining individual columns based on their range and metada provided--------------------------------------------------------------
+
+
+--2.Check if The data provided is for months November and December only.
+-- the data is for two months Nov 2017 & Dec 2017 i.e.any day before 1-nov-2017 and after 31-dec-2017(represent as >= 1-jan-2018) is out of context
+select count(*) from  nyt where tpep_pickup_datetime < '2017-11-1 00:00:00.0' or tpep_pickup_datetime>='2018-01-01 00:00:00.0';
+---> Result of above query:-   14 records are not in the range that is they do noty lie between november and december
+
+
+--  a.Check for which vendor is out of range to get an insight about vendors
+select  vendorid, count(*)from nyt where tpep_pickup_datetime < '2017-11-1 00:00:00.0' or tpep_pickup_datetime>='2018-01-01 00:00:00.0' group by vendorid;
+---> Result of above query:-   seems vendor 2 is at fault as all 14 records are recorded for vendor 2 being at fault
+-- 2	14
+
+
+--  b.Check for drop date : - The drop may have happened the next day hence the drop time is allowed to be till 1 jan 2018(represent as >= 2-jan-2018)
+select count(*) from nyt where tpep_dropoff_datetime < '2017-11-1 00:00:00.0' or tpep_dropoff_datetime>='2018-01-02 00:00:00.0';
+----> Result of above query : - 7 records in total are not in range
+
+
+--  c.Check for vendors w.r.t drop date 
+select vendorid,count(*) from  nyt where tpep_dropoff_datetime < '2017-11-1 00:00:00.0' or tpep_dropoff_datetime>='2018-01-02 00:00:00.0' group by vendorid;
+---> Result of above query :-   vendor 1 has 6 records and vendor 2 has 1 records
+
+
+--  d.we will evaluate vendor 1 a lil more in details, since it has only two records
+select * from  nyt where (tpep_dropoff_datetime < '2017-11-1 00:00:00.0' or tpep_dropoff_datetime>='2018-01-02 00:00:00.0') and vendorid=1;
+-- seems like the data is corrupt one record ending far in future(2019) and one in past(2016)
+
+--  e. drop of time can't be greater or equal too pick up time
+select count(*) from nyt where tpep_dropoff_datetime<=tpep_pickup_datetime;
+--->   Result of above query :- 6555 have drop of time<= pickup time
+
+--  f. check for % where drop of time<= pick up time
+SELECT SUM( IF(tpep_dropoff_datetime<=tpep_pickup_datetime,1,0) )/ COUNT(*) as pct FROM nyt;
+--->  Result of above querry : -  0.0055,a smaller set of records can be deleted/ignored
+
+-- g. Dividing which vendor is contributing more to the above query
+select vendorid, count(*) from nyt where tpep_dropoff_datetime <= tpep_pickup_datetime group by vendorid;
+--->  Result of above query:- Vendor 1 seems to be at fault lets evaluate few of its records as vendor1 has 3492 records and vendor2 hac 3063 records
+ 
+-- h. Checking records for vendor 1 which have drop time< pickup time
+select * from nyt where tpep_dropoff_datetime<=tpep_pickup_datetime and vendorid=1;
+---> Result of above query:-  well location id's for pick up and drop are changing and the billing seems to be different everytime .But since we can't be sure of what actual event took place thus we will ignore the records
+
+
+
+--------------------------------------------------------------------------------3. passenger_count---------------------------------------------------------------------------------------------------
+
+-- a. Check for passenger count 
+select passenger_count, count(*) as count from  maxim_assignment.Base_Data_Maxim BDM  group by passenger_count sort by passenger_count;
+----> Result of above query:- passenger count above 6 is small, like 7,8,9, may be bigger car, or driver manual entry mistake
+----> 0 again seems like an disinterested driver not putting in details, or an empty parcel being sent in teh cab we can note this down below.
+--	0	6824
+--	1	827499
+--	2	176872
+--	3	50693
+--	4	24951
+--	5	54568
+--	6	33146
+--	7	12
+--	8	3
+--	9	1
+
+
+--  b. check which vendor is at fault here i.e which vendor has maximum zero
+select vendorid,passenger_count, count(*) from nyt where passenger_count in  (0,7,8,9) group by vendorid,passenger_count order by passenger_count,vendorid;
+---> Result of above query : - we will ignore 0 in passenger_count as the count or records are not too high and can be to be ignored
+---> 9 record can be ignored, remaing records we will keep as is assuming that they are bigger car
+
+
+----------------------------------------------------------------------------- 4.trip_distance----------------------------------------------------------------------------------------------
+
+
+--  a. Data Dictionary:- The elapsed trip distance in miles reported by the taximeter.Check if distance is negative
+select  count(*) from nyt where trip_distance<=0;
+--->  Result of above query : -  7402 have negative trip distance
+
+-- b. Percentage of trip distanvce that is negative
+SELECT SUM( IF( trip_distance<=0,1,0) )/ COUNT(*) as pct FROM nyt;
+---> Result of above query->   0.0063018914188024
+
+-- c. grouping negative trip distanve with the help of vendor id
+select  vendorid,count(*) from  nyt where trip_distance<=0 group by vendorid;
+---> Result of above query:- Both vendor seems to be equally responsible for this as vendor1 has 4217 records and vendor2 has 3185 records
+
+
+----------------------------------------------------------------------------5. ratecodeid---------------------------------------------------------------------------------------------------
+
+-- a. Check for valid ratecodeid
+select  ratecodeid,count(*) from nyt group by ratecodeid;
+---> Result of above query :- 1-6 are valid id as per teh metadata, and 99 value based 9 records are incorrect thus we will ignore the 9 records
+
+-- b. vendorid wise analysis of ratecodeid that corresponds
+select vendorid , count(*) from  nyt where ratecodeid=99 group by vendorid;
+---> Result of above query :- Vendor 1 is the mazor contributor towards this data discripency as vendor 1=8
+-- 2	1
+ 
+
+-------------------------------------------------------------------------6. store_and_fwd_flag------------------------------------------------------------------------------------------------------
+
+-- Data quality check for the column
+select  store_and_fwd_flag,count(*) from  nyt group by store_and_fwd_flag;
+-- -> Result of the above query:- the value of yes and no are fine
+
+
+------------------------------------------------------------------------7. fare_amount----------------------------------------------------------------------------------------------------------------
+
+-- Data Dictionary :- The time-and-distance fare calculated by the meter.
+
+-- a.Check for the data quality
+select percentile_approx(fare_amount,array(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,0.99)) from  nyt;
+---> Result of above query:- [5.0,6.0,7.0,8.0,9.5,11.0,13.0,17.0,25.0,52.0] ->these values are acceptable lets tru a smaller percentile value
+
+-- b. Check for values in range(0.01,.999)
+select percentile_approx(fare_amount,array(0.01,0.999)) from  nyt;
+---> Result of above query:- [3.5,88.5] even these values are within range implies that the negative values and very high values are wrong data or outliner.Thus we can easily ignore negative values.
+
+-- c. Calcultaing the no of negative for the fare values
+select count(*) from nyt where fare_amount<0;
+---> Result of the above query:-  558 negative values
+
+-- d. lets find a upper limit for these fare values
+select count(*) from  nyt where fare_amount>100;
+---> Result of the above query:- 770 records
+
+-- e. let's try a bigger number for finding the upper limit
+select * from nyt BDM where fare_amount>1000
+---> Result of the above query : - 0 records fall in this category.
+
+-- f. Grouping negative fair amount with vendorid
+select vendorid ,count(*) from  nyt where fare_amount<0  group by vendorid;
+--->  Result of above query:- Vendor 1 has 0 records and vendor 2 has 558 records that means Vendor 2 is the major portion of the corrupt data
+
+
+--------------------------------------------------------------------------8. extra --------------------------------------------------------------------------------------------------------------------
+
+-- extra ranges between 69.8 --  -48.64, as seen previously by the min and max query. But data disctionary says :-Miscellaneous extras and surcharges. 
+-- Currently, this only includes the $0.50 and $1 rush hour and overnight charges.Hence we will reject these values let's verify their count
+
+-- a. Check for extra i.e. not in 0.0.5,1 rush hour
+select count(*) from  nyt where extra not in (0,0.5,1);
+---> Result of the above query->4856 records
+
+-- b. Check of percentage of above query
+SELECT SUM( IF( extra not in (0,0.5,1),1,0) )/ COUNT(*) as pct FROM nyt;
+---> Result of above query:- 0.004134 this data can be safely ignored
+
+-- c. Grouping rush hour according t the vendor
+select vendorid,count(*) from nyt where extra not in (0,0.5,1) group by vendorid;
+---> Result of thw above query:- both vendro seems to at fault as these are the only column where vendor 1 is also looking malicious since vendor1 has 1823 records and vemdor2 has 3033 records.
+
+
+---------------------------------------------------------------------9. mta_tax------------------------------------------------------------------------------------------------------------------
+
+-- max_mta_tax,min_mta_tax(117.85,-0.5) as mentioned above
+-- Data Dictionary :-$0.50 MTA tax that is automatically triggered based on the metered rate in use.
+
+-- a. Check if tax is automatically trigerred or not
+select count(*) from nyt where mta_tax not in (0,0.5);
+---> Result of above query :- 548 records returned
+
+--  b. Check percentage of records returned
+SELECT SUM( IF( mta_tax not in (0,0.5),1,0) )/ COUNT(*) as pct FROM nyt;
+---> Result of above query ->0.0004 smaller set, based on data disctionary we would ignore these
+
+-- c. Querying mra_tax based on vendor
+select vendorid,count(*) from  nyt where mta_tax not in (0,0.5) group by vendorid;
+---> Result of above query-> Both vendor are responsible as vendor1 1 record and vendor2 has 547 records but Vendor 2 is again mazorly at fault
+
+
+----------------------------------------------------------------------10.tip_amount-----------------------------------------------------------------------------------------------------------
+
+-- max_tip_amount,min_tip_amount(496,-218)
+-- Data dictionary - Tip amount – This field is automatically populated for credit card tips. 
+
+--  a. Check for negative values in the tip_amount column
+select count(*) from  nyt where tip_amount <0;
+---> Result of the above query:- only 4 values are negative can be easily be ignored
+
+--  b. Grouping negative tip_amount with respet to the vendor
+select vendorid,count(*) from  nyt where tip_amount <0 group by vendorid;
+---> Result of the above query:- all belong to vendor 2
+
+-- c.Let's chek if their are non credit card based tips
+select count(*) from  nyt where Payment_type!=1 and tip_amount>0;
+---> Result of the above query:- 17 records have payment mode other than credit and still have tip amount greate than 0 thuswe will ignore these records to sanity as well.
+
+-- .d grouping if their are non credit card based tips w.r.t vendorid
+select vendorid,count(*) from  nyt where Payment_type!=1 and tip_amount>0  group by vendorid;
+---> Result of the above query:-All records belong to vendor 1.we will remove these records as well
+
+
+----------------------------------------------------------------11. tolls_amount-----------------------------------------------------------------------------------------------------------------------
+
+-- max_tolls_amount,min_tolls_amount(1018.95,-19)
+-- Data Dictionary:- Total amount of all tolls paid in trip. 
+-- The value can't be negative
+
+-- a. Check for neagtive tolls_amount
+select count(*) from  nyt where tolls_amount <0;
+--->Result of the above query:- only 3 records can be safely ignored
+
+-- b. Grouping negative tolls_amount w.r.t. to vendorid
+select vendorid,count(*) from  nyt where tolls_amount <0 group by vendorid;
+--->Result of the above query:-A All vendor 2
+
+--------------------------------------------------------------12. improvement_surcharge---------------------------------------------------------------------------------------------------------------
+
+-- max_improvement_surcharge,min_improvement_surcharge(-0.3,393222.32)
+-- Data Dictionary :- $0.30 improvement surcharge assessed trips at the flag drop. 
+-- The improvement surcharge began being levied in 2015. 
+
+-- a. Check for improvement_surcharge
+select count(*) from  nyt where improvement_surcharge not in (0,0.3);
+--->Result of the above query:- only 562  can be easily ignored
+
+-- b. check in respect to vendor
+select vendorid,count(*) from  nyt where improvement_surcharge not in (0,0.3) group by vendorid;
+--->Result of the above query:- All records belong to vendor 2
+
+
+----------------------------------------------------------------13. total_amount-----------------------------------------------------------------------------------------------------------------------
+
+-- max_total_amount,min_total_amount(393222.32,-499.3)
+--Data Dictionary:-  The total amount charged to passengers. Does not include cash tips
+-- can be negative and has similar high value as fare_amount, we will check this with similar queries
+
+-- a. Check for if total_amount is negative
+select count(*) from  nyt where total_amount<0;
+--->Result of the above query:-  558 can be easily ignored
+
+-- b. Higehr value check
+select * from  nyt where total_amount>1000;
+--->Result of the above query:- 0 rows returned
+
+-- c. grouping vendor wise
+select vendorid,count(*) from  nyt where total_amount>1000 or total_amount<0  group by vendorid;
+--->Result of the above query:-Group 2 highly dominate in teh corrupt data section as vendor 2 has 558 records
+
+
+
+--================================================================Basic Data Quality Checks============================================================================================================
+-- 3.You might have encountered unusual or erroneous rows in the dataset.Can you conclude which vendor is doing a bad job in providing the records using different columns of the dataset
+-- Summarise your conclusions based on every column where these errors are present.For example,  There are unusual passenger count i.e 0 or 192 which is unusual.
+
+-- For the data It's mostly vendor 2 that is providing faulty data.
+-- Below is the list of problemtic data they have provided column wise
+
+-- invalid values for
+--                  1.total_amount 
+--                  2.improvement_surcharge
+--                  3.tolls_amount
+--                  4.tip_amount
+--                  5.mta_tax 
+--                  6.fare_amount
+--                  7.passenger_count
+--                  8.pickup 
+--                  9.drop off time
+
+-- For the column extra both vendor seems to be equally at fault
+-- Vendor 1 for has few tip amount where the payment mode is not credit card
+-- But overall Vendor 2 is definately not providing correct data.
+
+
+
+--==============================================================================================================================================================================================
+
+-- Before answering the below questions, you need to create a clean, ORC partitioned table for analysis.Remove all the erroneous rows.
+-- We will be partinening on the month column first as we need to answer question comparing between the two since we expect only two month data to pass from out filters year is not an any use in partionening
+-- Our secondarly partition is based on Vendor , although the question don't call for this one
+-- In general if we were analysing this data freely we would still want the partitioning to be done this way
+
+
+
+drop table pnyt;
+
+-- A. Creating the partiotion table
+
+create external table if not exists pnyt
+(tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance double,
+RatecodeID int,
+store_and_fwd_flag string,
+PULocationID int,
+DOLocationID int,
+payment_type int,
+fare_amount double,
+extra double,
+mta_tax double,
+tip_amount double,
+tolls_amount double,
+improvement_surcharge double,
+total_amount double)
+partitioned by (Mnth int,VendorID int)
+stored as orc location '/user/hive/warehouse/nyc_taxi'
+tblproperties ("orc.compress"="SNAPPY");
+
+
+-- b. Posting data
+insert overwrite table pnyt partition(Mnth,VendorID)
+select 
+tpep_pickup_datetime,
+tpep_dropoff_datetime,
+passenger_count,
+trip_distance,
+RatecodeID,
+store_and_fwd_flag,
+PULocationID,
+DOLocationID,
+payment_type,
+fare_amount,
+extra,
+mta_tax,
+tip_amount,
+tolls_amount,
+improvement_surcharge,
+total_amount,
+month(tpep_pickup_datetime) Mnth,
+VendorID
+from  nyt
+where  (tpep_pickup_datetime >='2017-11-1 00:00:00.0' and tpep_pickup_datetime<'2018-01-01 00:00:00.0') and
+( tpep_dropoff_datetime >= '2017-11-1 00:00:00.0' and tpep_dropoff_datetime<'2018-01-02 00:00:00.0') and
+(tpep_dropoff_datetime>tpep_pickup_datetime) and
+(passenger_count not in (0,192)) and
+(trip_distance>0) and 
+(ratecodeid!=99) and
+(fare_amount>0 ) and
+ (extra in (0,0.5,1)) and
+ (mta_tax  in (0,0.5)) and 
+((tip_amount >=0 and Payment_type=1) or (Payment_type!=1 and tip_amount=0)) and
+(tolls_amount >=0) and
+(improvement_surcharge in (0,0.3)) and
+(total_amount>0);
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------- Analysis of partition table------------------------------------------------------------------------------------------------------
+
+--  a. Count number of rows
+select count(*) from pnyt;
+---> Result of the ablove query:- 1153872
+
+-- b. Count of number of rows removed
+select 1174569-1153872;
+---> Result of above query:- 20697 were removed
+
+-- % of rows removed
+select 20697/1174569;
+-- amounting to 1.7% of data
+
+
+--========================================================================================================================================================================================================
+------------------------------------------------------------------------------ Analysis-I---------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------ 1 .Compare the overall average fare per trip for November and December.----------------------------------------------------------------------
+
+select mnth,round(avg(total_amount),2) as avg_total_amt,round(avg(fare_amount),2) as avg_fare_amt from pnyt  group by mnth;
+----> result of above query:- Overall the month Novemeber seems to be better considering total amount.This signifies that extra tax and charges are also coming in play during the month of November
+-- Month    Avg_total_amt    Avg_fare_amount
+--   11	        16.19	        12.91
+--   12	        15.89	        12.7
+
+
+------------------------- 2.a Explore the ‘number of passengers per trip’ - how many trips are made by each level of ‘Passenger_count’? Do most people travel solo or with other people?---------------
+
+select passenger_count,round((count(*)*100/1153872),4) cnt from pnyt group by passenger_count order by cnt desc;
+----> Result of above query:- Solo rides are most common , dominant infact with almost 70% of data belonging to them. Dual rides are the only other significant category with 15% occupancy
+-- Rest all are marginal below 5 %v.V lue for 9,8,7 are two small to be of any significance, may be corrupt data.
+--  1	70.8067
+--	2	15.1475
+--	5	4.6831
+--	3	4.3491
+--	6	2.8497
+--	4	2.1389
+
+
+-- 2.b Count for passenger_count = 7,
+select passenger_count,count(*) cnt from pnyt where passenger_count in (9,8,7) group by passenger_count order by cnt desc;
+---> Result of the above query:-
+-- 7	3
+
+
+---------------------------------------------------------------------- 3.Which is the most preferred mode of payment?-----------------------------------------------------------------------------------
+
+select payment_type,round((count(*)*100/1153872),4) cnt from pnyt group by payment_type order by cnt desc;
+---> Result of the above query:-Credit card pays are dominant with 67.5% and cash payment are 2nd highest paymnet 32%.Rest all modes are negligable.5 & 6 are not existance as previsously seen.
+--  1   	67.5251     Credit card
+--  2	    31.9497     Cash
+--  3	    0.3883     No charge
+--  4	    0.1122      Dispute
+-- 
+
+-------------------------------------------------------------------------- 4.What is the average tip paid per trip? -----------------------------------------------------------------------------------
+
+-- Compare the average tip with the 25th, 50th and 75th percentiles and 
+-- comment whether the ‘average tip’ is a representative statistic (of the central tendency) of ‘tip amount paid’. 
+-- Returns an approximate pth percentile of a numeric column (including floating point types) in the group.
+
+select round(avg(tip_amount),2) from pnyt;
+----> Result of the above query: -  1.83
+
+select percentile_approx(tip_amount,array(0.25,0.40,0.45,0.50,0.60,0.65,0.75))from pnyt;
+----> Result of the above query:- 25% or more values being zero tip do play a high part in this behaviour.Again the median 1.36 is much lower then the avg 1.82 due to the skewness towards higher values.
+--->  It would be advised to use median instead of mean for this particular column during analysis
+--      25%         0.40        0.45         50%        60%          65%            75%
+-- 	    0.0         1.0         1.15         1.36       1.76         1.997          2.45
+
+
+----------------------------------------------- 5. Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied? ------------------------------------------------
+select extra,round((count(*)*100/1153872),4) cnt from (select case when extra>0 then 1 else 0 end  extra from pnyt) T group by extra order by cnt desc;
+---> Result of the above query :-The distribusion is fairly even with 46.1341% records having extra charges applied , where as  53.8412 % have no extra charges applied 
+--      Extra applied        %age records
+--           0	                53.8412
+--           1	                46.1341
+
+
+--======================================================================================================================================================================================================
+--______________________________________________________________________________ Analysis-II____________________________________________________________________________________________________________
+
+
+----------------------1. What is the correlation between the number of passengers on any given trip, and the tip paid per trip? Do multiple travellers tip more compared to solo travellers?------------------------------
+
+select round(corr(passenger_count, tip_amount),4) from pnyt
+----> Result of the above query :- the value is fairly small although negative but its would be fair to say that passenger count is unrealted to the tip amount paid. output:- -0.0053
+
+
+--1.b comparing only single vs multiple ride using correlation
+select round(corr(is_solo, tip_amount),4) from 
+(select case when passenger_count=1 then 1 else 0 end is_solo,tip_amount from pnyt ) T;
+---> Result of the baove query :-  0.0062, comparing only single vs multiple rider count their is still very low co-relation
+
+--1.c comparing only single vs multiple ride without using correlation
+select is_solo,round(avg(tip_amount),4) from 
+(select case when passenger_count=1 then 1 else 0 end is_solo,tip_amount from pnyt) T group by is_solo;
+---> Result of the abive query :- Values are almost same
+--          0	    1.8023
+--	        1	    1.8354
+ 
+
+
+
+------------------------------------------------- 2. Segregate the data into five segments of ‘tip paid’: [0-5), [5-10), [10-15) , [15-20) and >=20.-----------------------------------------------------------
+--    Calculate the percentage share of each bucket (i.e. the fraction of trips falling in each bucket).
+
+select Tip_range, round((count(*)*100/1153872),4) cnt
+from (select
+case when (tip_amount>=0 and tip_amount<5)   then '[0-5)' 
+     when (tip_amount>=5 and tip_amount<10)  then '[5-10)' 
+     when (tip_amount>=10 and tip_amount<15) then '[10-15)'
+     when (tip_amount>=15 and tip_amount<20) then '[15-20)'
+     when (tip_amount>=20)                   then '>=20' end Tip_range
+     from pnyt) T 
+     group by Tip_range
+     order by cnt desc;
+---> Result of the above query :-0-5 range is the most prominate group with 92.831% records, we already know 25%+ of these are 0 values from the precious percentile based check
+---> 5-10 represening a small fraction of 5.6%, remaning set are almost neglihgble amount to 2% of data
+--          [0-5)	        92.381
+--          [5-10)	        5.6366
+--          [10-15)	        1.6825
+--          [15-20)	        0.1872
+--          >=20	        0.0881
+ 
+
+---------------------------------------------------------------- 3.Which month has a greater average ‘speed’ - November or December?--------------------------------------------------------------------
+
+-- Note that the variable ‘speed’ will have to be derived from other metrics.
+-- we will calculate duratiob by suntaring drop of time with pick uo time, since we are using unix timestamp function(as direct suntraction of timestamp column didn't work)
+-- values will be returned in sec hence we will be dividing it by 3600 to get value get hour
+-- since distance is specified in miles out final value will be in miles/hour unit
+
+select mnth , round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600) ),2) avg_speed
+from pnyt group by mnth order by avg_speed desc;
+---> Result of the above query:- -- December month is marginally faster by 0.10 miles/hour
+--              11	            10.97
+--	            12	            11.07
+
+
+
+--------------------------------------------------------------------- 4.Analyse the average speed of the most happening days of the year-------------------------------------------------------------
+
+-- i.e. 31st December (New year’s eve) and 25th December (Christmas Eve) and compare it with the overall average. 
+-- any trip that started on 25th or 31 will be considerd for the avg calculation irrespective of the fact that it might have ended on the next day
+
+select IsHoliday, round(avg(speed),2) avg_speed from 
+(select case when ((tpep_pickup_datetime>='2017-12-25 00:00:00.0' and tpep_pickup_datetime<'2017-12-26 00:00:00.0') 
+or (tpep_pickup_datetime>='2017-12-31 00:00:00.0' and tpep_pickup_datetime<'2018-01-01 00:00:00.0')  ) then 1 else 0 end IsHoliday   , 
+trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600) speed
+from pnyt) T
+group by IsHoliday
+order by avg_speed desc;
+----> Result of the above query :- 
+--                      1	14.01
+--                      0	10.95
+
+-- b. differnce holiday and not holiday
+select 14.01-10.95;
+----> Result of the above query:- as the Cab's are running at a faster average speed by a margin of  3.06 miles/hour
+-- The non festive day average is in sync with november and december averages at around 10.95 miles/per hour
+
+
+-- c . let's confirm teh overall averages once
+select round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600)),2) avg_speed
+from pnyt;
+---> Result of the above query : 11.02 is the overall avg speed as expected so the faster speed on 25th and 31 dec amounts to 0.07(10.95 was for non holiday days) increment on the overall speed 
+
+-- d.  Let's compare individual days too
+-- christmas
+
+select Day_type,round(avg(trip_distance/((unix_timestamp(tpep_dropoff_datetime)-unix_timestamp(tpep_pickup_datetime) )/3600)),2) avg_speed
+from ( 
+select trip_distance,tpep_dropoff_datetime,tpep_pickup_datetime,
+case when ((tpep_pickup_datetime>='2017-12-25 00:00:00.0' and tpep_pickup_datetime<'2017-12-26 00:00:00.0')) then 1
+when ((tpep_pickup_datetime>='2017-12-31 00:00:00.0' and tpep_pickup_datetime<'2018-01-01 00:00:00.0')  ) then 2 else 0 end Day_type 
+from pnyt
+) T
+group by Day_type;
+-----> Result of the above query:- The fasted avg speed is oberved on chrismat day @ 15.27 miles/hour; 2.03 miles/hour faster than new year eve mark of 13.24 miles/hour
+--               0	        10.95           rest of the days
+--	             1	        15.27           Chritsmas
+--               2	        13.24           new year eve
+-- The result represent similar value to the combined is-holiday data i.e. Both are indidvidually much faster than the average time taken on other days  
+
+--=========================================================================================================================================================================================================
